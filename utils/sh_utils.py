@@ -22,6 +22,7 @@
 #  POSSIBILITY OF SUCH DAMAGE.
 
 import torch
+import torch.nn.functional as F  # Make sure F is imported
 
 C0 = 0.28209479177387814
 C1 = 0.4886025119029199
@@ -110,6 +111,59 @@ def eval_sh(deg, sh, dirs):
                             C4[7] * xz * (xx - 3 * yy) * sh[..., 23] +
                             C4[8] * (xx * (xx - 3 * yy) - yy * (3 * xx - yy)) * sh[..., 24])
     return result
+
+
+def sh_to_irradiance(sh, normals):
+    """
+    Calculates irradiance from 2nd-order SH light and a normal map.
+    Assumes SH coefficients are in the standard basis (L00, L1-1, L10, L11, L2-2, ...).
+    
+    Args:
+        sh (torch.Tensor): SH coefficients of incident light. Shape (..., C, (deg+1)**2),
+                           where C is color channels (e.g., 3 for RGB).
+                           For deg=2, shape is (..., 3, 9).
+        normals (torch.Tensor): Normal vectors. Shape (..., 3)
+        
+    Returns:
+        torch.Tensor: Irradiance (RGB). Shape (..., 3)
+    """
+    # Pre-convolved coefficients for the clamped cosine lobe (Lambertian BRDF)
+    # These constants are derived from integrating Y_lm * max(0, n·ω) over the sphere.
+    # A0 = π, A1 = 2π/3, A2 = π/4
+    # c0 = 1/sqrt(4π), c1 = sqrt(3/4π), c2 = ...
+    # k_lm = A_l * c_l
+    # We use pre-calculated values for simplicity.
+    # See "Stupid SH Tricks" by Peter-Pike Sloan for derivation.
+    C0 = 0.28209479177387814 # 1 / (2 * sqrt(pi))
+    C1 = 0.4886025119029199  # sqrt(3) / (2 * sqrt(pi))
+    C2 = 1.0925484305920792  # sqrt(15) / (2 * sqrt(pi))
+    C3 = 0.31539156525252005 # sqrt(5) / (4 * sqrt(pi))
+    C4 = 0.5462742152960396  # sqrt(15) / (4 * sqrt(pi))
+
+    # Ensure normals are unit vectors
+    normals = F.normalize(normals, dim=-1)
+    nx, ny, nz = normals[..., 0:1], normals[..., 1:2], normals[..., 2:3]
+
+    # The shape of sh is assumed to be (..., 3, 9)
+    # The shape of normals is (..., 3)
+    
+    # We need to access each SH band for each color channel.
+    # sh[..., :, 0] is the L0,0 band for R, G, B. Shape (..., 3)
+    irradiance = sh[..., :, 0] * C0 * 3.14159 * 1.0
+    
+    # L1 band (degree 1)
+    irradiance += sh[..., :, 1] * C1 * 2.09439 * (-ny)
+    irradiance += sh[..., :, 2] * C1 * 2.09439 * nz
+    irradiance += sh[..., :, 3] * C1 * 2.09439 * (-nx)
+    
+    # L2 band (degree 2)
+    irradiance += sh[..., :, 4] * C2 * 0.78539 * (nx * ny)
+    irradiance += sh[..., :, 5] * C2 * 0.78539 * (-ny * nz)
+    irradiance += sh[..., :, 6] * C3 * 0.78539 * (3 * nz*nz - 1)
+    irradiance += sh[..., :, 7] * C2 * 0.78539 * (-nx * nz)
+    irradiance += sh[..., :, 8] * C4 * 0.78539 * (nx*nx - ny*ny)
+    
+    return irradiance
 
 def RGB2SH(rgb):
     return (rgb - 0.5) / C0
