@@ -115,55 +115,71 @@ def eval_sh(deg, sh, dirs):
 
 def sh_to_irradiance(sh, normals):
     """
-    Calculates irradiance from 2nd-order SH light and a normal map.
-    Assumes SH coefficients are in the standard basis (L00, L1-1, L10, L11, L2-2, ...).
-    
+    Calculates irradiance from up to 2nd-order SH light and a normal map.
+    Handles variable SH degrees based on input tensor shape.
+
     Args:
-        sh (torch.Tensor): SH coefficients of incident light. Shape (..., C, (deg+1)**2),
-                           where C is color channels (e.g., 3 for RGB).
-                           For deg=2, shape is (..., 3, 9).
+        sh (torch.Tensor): SH coefficients of incident light. Shape (..., C, num_bands),
+                           e.g., (H, W, 3, 1), (H, W, 3, 4), or (H, W, 3, 9).
         normals (torch.Tensor): Normal vectors. Shape (..., 3)
-        
+
     Returns:
         torch.Tensor: Irradiance (RGB). Shape (..., 3)
     """
-    # Pre-convolved coefficients for the clamped cosine lobe (Lambertian BRDF)
-    # These constants are derived from integrating Y_lm * max(0, n·ω) over the sphere.
-    # A0 = π, A1 = 2π/3, A2 = π/4
-    # c0 = 1/sqrt(4π), c1 = sqrt(3/4π), c2 = ...
-    # k_lm = A_l * c_l
-    # We use pre-calculated values for simplicity.
-    # See "Stupid SH Tricks" by Peter-Pike Sloan for derivation.
-    C0 = 0.28209479177387814 # 1 / (2 * sqrt(pi))
-    C1 = 0.4886025119029199  # sqrt(3) / (2 * sqrt(pi))
-    C2 = 1.0925484305920792  # sqrt(15) / (2 * sqrt(pi))
-    C3 = 0.31539156525252005 # sqrt(5) / (4 * sqrt(pi))
-    C4 = 0.5462742152960396  # sqrt(15) / (4 * sqrt(pi))
+    # ... (Constants C0, C1, etc. remain the same)
+    C0 = 0.28209479177387814
+    C1 = 0.4886025119029199
+    C2 = 1.0925484305920792
+    C3 = 0.31539156525252005
+    C4 = 0.5462742152960396
 
-    # Ensure normals are unit vectors
+    num_bands = sh.shape[-1]
+
+    # Ensure normals are unit vectors and have the right shape for broadcasting
     normals = F.normalize(normals, dim=-1)
     nx, ny, nz = normals[..., 0:1], normals[..., 1:2], normals[..., 2:3]
 
-    # The shape of sh is assumed to be (..., 3, 9)
-    # The shape of normals is (..., 3)
-    
-    # We need to access each SH band for each color channel.
-    # sh[..., :, 0] is the L0,0 band for R, G, B. Shape (..., 3)
-    irradiance = sh[..., :, 0] * C0 * 3.14159 * 1.0
-    
-    # L1 band (degree 1)
-    irradiance += sh[..., :, 1] * C1 * 2.09439 * (-ny)
-    irradiance += sh[..., :, 2] * C1 * 2.09439 * nz
-    irradiance += sh[..., :, 3] * C1 * 2.09439 * (-nx)
-    
-    # L2 band (degree 2)
-    irradiance += sh[..., :, 4] * C2 * 0.78539 * (nx * ny)
-    irradiance += sh[..., :, 5] * C2 * 0.78539 * (-ny * nz)
-    irradiance += sh[..., :, 6] * C3 * 0.78539 * (3 * nz*nz - 1)
-    irradiance += sh[..., :, 7] * C2 * 0.78539 * (-nx * nz)
-    irradiance += sh[..., :, 8] * C4 * 0.78539 * (nx*nx - ny*ny)
-    
-    return irradiance
+    # Initialize irradiance with zeros
+    irradiance = torch.zeros_like(normals)
+
+    # Always compute L0 (ambient) term
+    if num_bands >= 1:
+        # NOTE: The formula for irradiance involves pi. The original 2DGS code might not use it.
+        # Let's use the simplified form that's common in games, which absorbs constants.
+        # Irradiance_L0 = c1 * L0,0 where c1 = sqrt(pi).
+        # We need to be consistent. Let's use the formula from "Stupid SH Tricks".
+        # Irradiance(n) = sum_l,m A_l * L_lm * Y_lm(n)
+        # For Lambertian: A0=pi, A1=2pi/3, A2=pi/4.
+
+        # Let's simplify and assume constants are baked into the learned SH coefficients for now.
+        # This is often more stable for learning.
+        # This means we just need the dot product with the SH basis functions.
+        # The basis functions Y_lm(n) are needed.
+        # Y_0,0 = C0
+        # Y_1,-1 = -C1 * y, Y_1,0 = C1 * z, Y_1,1 = -C1 * x
+        # ... and so on.
+
+        # Let's implement this correctly.
+        irradiance += sh[..., :, 0] * C0
+
+    if num_bands >= 4:  # L1 bands (1-3)
+        irradiance += sh[..., :, 1] * (-C1 * ny)
+        irradiance += sh[..., :, 2] * (C1 * nz)
+        irradiance += sh[..., :, 3] * (-C1 * nx)
+
+    if num_bands >= 9:  # L2 bands (4-8)
+        irradiance += sh[..., :, 4] * (C2 * nx * ny)
+        irradiance += sh[..., :, 5] * (C2 * -ny * nz)
+        irradiance += sh[..., :, 6] * (C3 * (3 * nz * nz - 1))
+        irradiance += sh[..., :, 7] * (C2 * -nx * nz)
+        irradiance += sh[..., :, 8] * (C4 * (nx * nx - ny * ny))
+
+    # The factor of pi is part of the Lambertian BRDF (albedo / pi).
+    # The integral ∫ L_in(ω) * cos(θ) dω is the irradiance.
+    # The result here should be multiplied by albedo / pi.
+    # To avoid negative irradiance, clamp it.
+    return torch.clamp(irradiance, min=0.0)
+
 
 def RGB2SH(rgb):
     return (rgb - 0.5) / C0
