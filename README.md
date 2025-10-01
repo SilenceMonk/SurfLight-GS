@@ -192,3 +192,5 @@ If you find our code or paper helps, please consider citing:
     doi       = {10.1145/3641519.3657428}
 }
 ```
+
+> 首先我们只使用2阶SH表示入射光+lambertian brdf结合2dgs的框架先进行训练看能否收敛，以及基本的novel view synthesis。如何开始着手实现？
