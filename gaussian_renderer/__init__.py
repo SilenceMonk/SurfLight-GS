@@ -58,11 +58,15 @@ def render(viewpoint_camera, pc : GaussianModel, pipe, bg_color : torch.Tensor, 
     means2D = screenspace_points
     opacity = pc.get_opacity
 
-    # If precomputed 3d covariance is provided, use it. If not, then it will be computed from
-    # scaling / rotation by the rasterizer.
-    scales = None
-    rotations = None
+    # --- FIX START ---
+    # Ensure scales and rotations are always provided, and cov3D_precomp is None
+    # (unless specifically using that path, which we are not).
+    scales = pc.get_scaling
+    rotations = pc.get_rotation
     cov3D_precomp = None
+    # The original if/else for pipe.compute_cov3D_python is complex and not needed
+    # for our current goal. We simplify it to always use scales/rotations.
+    # --- FIX END ---
     
     # --- MODIFICATION START ---
     # Our new strategy:
