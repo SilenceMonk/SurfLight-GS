@@ -101,22 +101,22 @@ def evaluate_sh_basis(dirs, deg=2):
 
 def compute_sg_zh_analytical(lambda_val, deg=2):
     """
-    使用解析公式计算SG的Zonal Harmonics (ZH)系数。
-    该SG的定义为 exp(λ(cos(θ) - 1))。
+    使用解析公式计算SG的Zonal Harmonics (ZH)系数
+
+    基于Legendre多项式与exp(λx)积分的正确推导
 
     Args:
-        lambda_val: (H, W) 或 (...) - SG锐度参数λ
+        lambda_val: (...) - SG锐度参数λ
         deg: int - SH阶数 (0-4), 默认为2
-
     Returns:
-        list of tensors - [zh0, zh1, ..., zh_deg], 每个shape与lambda_val相同
+        list of tensors - [zh0, zh1, ..., zh_deg]
     """
     assert deg >= 0 and deg <= 4, "Only degrees 0-4 are supported"
 
     device = lambda_val.device
     dtype = lambda_val.dtype
 
-    # 为防止除以零，添加一个小的epsilon
+    # 防止除零
     lam = lambda_val + 1e-8
 
     # 预计算常用项
@@ -132,22 +132,23 @@ def compute_sg_zh_analytical(lambda_val, deg=2):
 
     zh_coeffs = []
 
-    # L=0
-    # zh_0 = 2 * sqrt(π) * e^{-λ} * sinh(λ) / λ
+    # L=0: P_0(x) = 1
+    # I_0 = 2sinh(λ)/λ
     factor0 = 2.0 * math.sqrt(math.pi)
     zh0 = factor0 * exp_minus_lam * sinh_lam * lam_inv
     zh_coeffs.append(zh0)
 
     if deg >= 1:
-        # L=1
-        # zh_1 = 2 * sqrt(3π) * e^{-λ} * [cosh(λ)/λ - sinh(λ)/λ²]
+        # L=1: P_1(x) = x
+        # I_1 = 2cosh(λ)/λ - 2sinh(λ)/λ²
+        # 除以2后: cosh(λ)/λ - sinh(λ)/λ²
         factor1 = 2.0 * math.sqrt(3.0 * math.pi)
         zh1 = factor1 * exp_minus_lam * (cosh_lam * lam_inv - sinh_lam * lam_inv_sq)
         zh_coeffs.append(zh1)
 
     if deg >= 2:
-        # L=2
-        # zh_2 = 2 * sqrt(5π) * e^{-λ} * [(1/λ + 3/λ³)sinh(λ) - (3/λ²)cosh(λ)]
+        # L=2: P_2(x) = (3x² - 1)/2
+        # 积分/2 = (1/λ + 3/λ³)sinh(λ) - 3/λ²cosh(λ)
         factor2 = 2.0 * math.sqrt(5.0 * math.pi)
         term_sinh = (lam_inv + 3.0 * lam_inv_cub) * sinh_lam
         term_cosh = 3.0 * lam_inv_sq * cosh_lam
@@ -155,17 +156,17 @@ def compute_sg_zh_analytical(lambda_val, deg=2):
         zh_coeffs.append(zh2)
 
     if deg >= 3:
-        # L=3
-        # zh_3 = 2 * sqrt(7π) * e^{-λ} * [(6/λ² + 15/λ⁴)cosh(λ) - (6/λ + 15/λ³)sinh(λ)]
+        # L=3: P_3(x) = (5x³ - 3x)/2
+        # 积分/2 = (1/λ + 15/λ³)cosh(λ) - (6/λ² + 15/λ⁴)sinh(λ)
         factor3 = 2.0 * math.sqrt(7.0 * math.pi)
-        term_cosh = (6.0 * lam_inv_sq + 15.0 * lam_inv_4) * cosh_lam
-        term_sinh = (6.0 * lam_inv + 15.0 * lam_inv_cub) * sinh_lam
+        term_cosh = (lam_inv + 15.0 * lam_inv_cub) * cosh_lam
+        term_sinh = (6.0 * lam_inv_sq + 15.0 * lam_inv_4) * sinh_lam
         zh3 = factor3 * exp_minus_lam * (term_cosh - term_sinh)
         zh_coeffs.append(zh3)
 
     if deg >= 4:
-        # L=4
-        # zh_4 = 2 * sqrt(9π) * e^{-λ} * [(1/λ + 45/λ³ + 105/λ⁵)sinh(λ) - (10/λ² + 105/λ⁴)cosh(λ)]
+        # L=4: P_4(x) = (35x⁴ - 30x² + 3)/8
+        # 积分/2 = (1/λ + 45/λ³ + 105/λ⁵)sinh(λ) - (10/λ² + 105/λ⁴)cosh(λ)
         factor4 = 2.0 * math.sqrt(9.0 * math.pi)
         term_sinh = (lam_inv + 45.0 * lam_inv_cub + 105.0 * lam_inv_5) * sinh_lam
         term_cosh = (10.0 * lam_inv_sq + 105.0 * lam_inv_4) * cosh_lam
